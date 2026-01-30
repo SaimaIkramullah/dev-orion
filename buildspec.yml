@@ -1,0 +1,93 @@
+version: 0.2
+
+# AWS CodeBuild buildspec for Orion Technologies website
+# This file defines the build process for deploying to S3 + CloudFront
+
+env:
+  variables:
+    # These should be set in CodeBuild project environment variables
+    # BUCKET_NAME: oriontechnologies.com
+    # DISTRIBUTION_ID: E1234567890ABC
+    AWS_DEFAULT_REGION: us-east-1
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Installing dependencies..."
+      - aws --version
+      - node --version
+
+  pre_build:
+    commands:
+      - echo "Running pre-build validation..."
+      - echo "Validating environment variables..."
+      - |
+        if [ -z "$BUCKET_NAME" ]; then
+          echo "ERROR: BUCKET_NAME environment variable not set"
+          exit 1
+        fi
+      - |
+        if [ -z "$DISTRIBUTION_ID" ]; then
+          echo "ERROR: DISTRIBUTION_ID environment variable not set"
+          exit 1
+        fi
+      # Optional: Run HTML validation
+      # - npm install -g html-validate
+      # - html-validate *.html
+
+  build:
+    commands:
+      - echo "Starting deployment to S3..."
+      - echo "Bucket: $BUCKET_NAME"
+      - echo "Distribution: $DISTRIBUTION_ID"
+      
+      # Sync all files to S3
+      - |
+        aws s3 sync . s3://${BUCKET_NAME} \
+          --delete \
+          --exclude ".git/*" \
+          --exclude "buildspec.yml" \
+          --exclude ".github/*" \
+          --exclude ".gitlab-ci.yml" \
+          --exclude "*.md" \
+          --exclude "*.sh" \
+          --exclude "PREVIEW.html" \
+          --cache-control "max-age=31536000,public"
+      
+      # Set shorter cache for HTML files
+      - |
+        aws s3 cp . s3://${BUCKET_NAME} \
+          --recursive \
+          --exclude "*" \
+          --include "*.html" \
+          --cache-control "max-age=3600,public"
+      
+      - echo "✅ Files uploaded to S3"
+
+  post_build:
+    commands:
+      - echo "Invalidating CloudFront cache..."
+      - |
+        INVALIDATION_ID=$(aws cloudfront create-invalidation \
+          --distribution-id ${DISTRIBUTION_ID} \
+          --paths "/*" \
+          --query 'Invalidation.Id' \
+          --output text)
+      - echo "CloudFront invalidation created: $INVALIDATION_ID"
+      - echo "✅ Deployment complete!"
+      - echo "Site will be updated in 5-15 minutes after cache invalidation"
+
+# Optional: Define artifacts (not needed for S3 deployment)
+# artifacts:
+#   files:
+#     - '**/*'
+
+# Optional: Cache dependencies between builds
+cache:
+  paths:
+    - 'node_modules/**/*'
+
+# Build will fail if any command returns non-zero exit code
+reports: {}

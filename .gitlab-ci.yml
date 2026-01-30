@@ -1,0 +1,96 @@
+image: amazon/aws-cli:latest
+
+stages:
+  - test
+  - deploy
+
+variables:
+  AWS_DEFAULT_REGION: us-east-1
+  PRODUCTION_BUCKET: oriontechnologies.com
+  STAGING_BUCKET: staging.oriontechnologies.com
+
+# Optional: Run tests/validation before deploy
+validate:
+  stage: test
+  image: node:18
+  script:
+    - npm install -g html-validate
+    - html-validate *.html || true
+  only:
+    - main
+    - staging
+
+# Deploy to staging environment
+deploy_staging:
+  stage: deploy
+  before_script:
+    - aws --version
+  script:
+    - echo "Deploying to staging..."
+    - |
+      aws s3 sync . s3://${STAGING_BUCKET} \
+        --delete \
+        --exclude ".git/*" \
+        --exclude ".gitlab-ci.yml" \
+        --exclude "*.md" \
+        --exclude "*.sh" \
+        --cache-control "max-age=3600,public"
+    - |
+      aws cloudfront create-invalidation \
+        --distribution-id ${CLOUDFRONT_STAGING_DISTRIBUTION_ID} \
+        --paths "/*"
+    - echo "✅ Staging deployment complete!"
+  only:
+    - staging
+  environment:
+    name: staging
+    url: https://staging.oriontechnologies.com
+
+# Deploy to production
+deploy_production:
+  stage: deploy
+  before_script:
+    - aws --version
+  script:
+    - echo "Deploying to production..."
+    - |
+      aws s3 sync . s3://${PRODUCTION_BUCKET} \
+        --delete \
+        --exclude ".git/*" \
+        --exclude ".gitlab-ci.yml" \
+        --exclude "*.md" \
+        --exclude "*.sh" \
+        --cache-control "max-age=31536000,public"
+    - |
+      aws s3 cp . s3://${PRODUCTION_BUCKET} \
+        --recursive \
+        --exclude "*" \
+        --include "*.html" \
+        --cache-control "max-age=3600,public"
+    - |
+      aws cloudfront create-invalidation \
+        --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} \
+        --paths "/*"
+    - echo "✅ Production deployment complete!"
+  only:
+    - main
+  when: manual  # Require manual approval for production
+  environment:
+    name: production
+    url: https://oriontechnologies.com
+
+# Optional: Rollback job
+rollback_production:
+  stage: deploy
+  script:
+    - echo "Rolling back production..."
+    # Implement rollback logic here
+  only:
+    - main
+  when: manual
+
+# Configure these in GitLab CI/CD Settings > Variables:
+# AWS_ACCESS_KEY_ID (protected, masked)
+# AWS_SECRET_ACCESS_KEY (protected, masked)
+# CLOUDFRONT_DISTRIBUTION_ID (protected)
+# CLOUDFRONT_STAGING_DISTRIBUTION_ID (protected)

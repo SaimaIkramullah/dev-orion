@@ -1,0 +1,7 @@
+# Ignore Terraform cache and providers
+Terraform/.terraform/
+
+# Ignore Terraform state files
+*.tfstate
+*.tfstate.backup
+*.tfvarsdir 
